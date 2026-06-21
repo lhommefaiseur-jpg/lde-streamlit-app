@@ -43,15 +43,10 @@ Fish and chips, tea and scones are emblematic of British cuisine.
 """
 }
 
-# ---------------- NORMALISATION AMÉLIORÉE ----------------
+
 
 def normalize_text(text):
-    """Supprime les accents pour éviter que 'é' et 'e' soient traités différemment."""
-    # FIX 1 : on garde les accents pour mieux distinguer fr/es (ils ont des accents différents)
-    # Donc on NE normalise PAS les accents — ils sont discriminants !
     return ''.join(c.lower() for c in text if c.isalpha())
-
-# ---------------- TRIGRAMMES ----------------
 
 def get_trigram_frequencies(text):
     text = normalize_text(text)
@@ -61,8 +56,6 @@ def get_trigram_frequencies(text):
     total = len(trigrams)
     counts = Counter(trigrams)
     return {k: v / total for k, v in counts.items()}
-
-# ---------------- PROFILS ----------------
 
 PROFILS_TRIGRAMMES = {
     langue: get_trigram_frequencies(corpus)
