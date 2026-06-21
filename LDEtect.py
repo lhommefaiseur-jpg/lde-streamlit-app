@@ -272,7 +272,7 @@ def detecter_langue(texte):
 
 # ---------------- STREAMLIT ----------------
 
-st.title("Détecteur de langue")
+st.title("Détecteur de langue V3")
 
 st.write(
     "Méthode : Entropie d'ordre 3 + mots fréquents (mots entiers) + accents"
