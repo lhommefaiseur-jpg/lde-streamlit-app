@@ -166,6 +166,30 @@ def score_accents(texte, langue):
 
     return score
 
+# ---------------- SEUIL DE CONFIANCE ----------------
+# Un seuil sur le score brut total est peu fiable : ce score dépend
+# fortement de la longueur du texte (plus de mots = mécaniquement plus
+# de mots-clés et d'accents comptés), donc aucune valeur fixe ne
+# fonctionne bien à la fois sur les textes courts et longs.
+#
+# On utilise donc deux conditions complémentaires, plus robustes :
+#
+#   1) RATIO_MIN_AVANCE : la langue gagnante doit nettement se
+#      détacher de la 2e meilleure langue (sinon le texte est ambigu
+#      entre 2 langues, ou ressemble un peu à toutes sans appartenir
+#      clairement à aucune — cas typique d'une langue étrangère
+#      proche, comme l'italien ou l'allemand, qui partage quelques
+#      lettres/sons avec le français/espagnol).
+#
+#   2) SIGNAL_LEXICAL_MIN : il faut au moins ce nombre d'indices
+#      lexicaux concrets (mots-clés reconnus + caractères accentués
+#      spécifiques) pour la langue gagnante. Cela évite qu'un texte
+#      qui ne matche presque rien soit validé uniquement parce que
+#      l'entropie d'ordre 3 penche légèrement d'un côté (l'entropie
+#      seule n'est pas un signal assez fort pour décider).
+RATIO_MIN_AVANCE = 1.3
+SIGNAL_LEXICAL_MIN = 2
+
 # ---------------- DETECTION ----------------
 
 def detecter_langue(texte):
@@ -176,6 +200,7 @@ def detecter_langue(texte):
         return None, h3, None
 
     scores = {}
+    signal_lexical = {}
 
     for langue in CORPUS:
 
@@ -188,17 +213,36 @@ def detecter_langue(texte):
         # Score mots : matching par mots entiers désormais (voir
         # tokeniser/score_mots), donc plus de faux positifs sur
         # sous-chaînes.
-        score_mot = score_mots(texte, langue) * 10
+        sm = score_mots(texte, langue)
+        score_mot = sm * 10
 
         # Score accents : inchangé, déjà fiable car les caractères
         # accentués sont peu ambigus entre langues.
-        score_accent = score_accents(texte, langue) * 15
+        sa = score_accents(texte, langue)
+        score_accent = sa * 15
 
-        score_total = score_entropie + score_mot + score_accent
+        scores[langue] = score_entropie + score_mot + score_accent
 
-        scores[langue] = score_total
+        # Nombre brut d'indices lexicaux trouvés (avant pondération),
+        # utilisé uniquement pour la condition de seuil ci-dessous.
+        signal_lexical[langue] = sm + sa
 
     meilleure_langue = max(scores, key=scores.get)
+
+    tries = sorted(scores.values(), reverse=True)
+    meilleur_score, second_score = tries[0], tries[1]
+
+    ratio_ok = (
+        second_score == 0
+        or meilleur_score >= second_score * RATIO_MIN_AVANCE
+    )
+    signal_ok = signal_lexical[meilleure_langue] >= SIGNAL_LEXICAL_MIN
+
+    # Si la langue gagnante ne se détache pas assez et/ou n'a pas
+    # assez d'indices lexicaux concrets, on considère que le texte
+    # n'appartient à aucune des 3 langues supportées.
+    if not (ratio_ok and signal_ok):
+        return "inconnue", h3, scores
 
     return meilleure_langue, h3, scores
 
@@ -224,6 +268,20 @@ if st.button("Analyser"):
 
         if langue is None:
             st.error("Texte trop court.")
+
+        elif langue == "inconnue":
+            st.error(
+                "Langue non reconnue : le texte ne correspond à aucune "
+                "des 3 langues supportées (français, anglais, espagnol). "
+                "Vérifiez que vous avez bien saisi un texte dans l'une "
+                "de ces langues, ou ajoutez un peu plus de texte pour "
+                "permettre une détection plus fiable."
+            )
+            st.info(f"Entropie d'ordre 3 : {entropie:.4f} bits")
+            with st.expander("Voir le détail des scores"):
+                for l, s in sorted(scores.items(), key=lambda x: -x[1]):
+                    st.write(f"{l} : {s:.2f}")
+
         else:
             st.success(f"Langue détectée : {langue}")
             st.info(f"Entropie d'ordre 3 : {entropie:.4f} bits")
