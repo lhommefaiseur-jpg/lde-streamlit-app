@@ -108,7 +108,7 @@ MOTS_CLES = {
     ],
 
     "espagnol": [
-        "el", "los", "las", "una", "es", "para", "con", "del", "desde",
+        "el", "los", "las", "una", "para", "con", "del", "desde",
         "como", "español", "lengua", "historia", "mundo", "informática",
         "información", "estudiantes", "aprenden",
         "literatura", "entropía", "universidad", "escuela"
@@ -126,7 +126,10 @@ ACCENTS = {
     "anglais": [],
 
     "espagnol": [
-        "ñ", "á", "í", "ó", "ú", "ü"
+        # NB: "ü" a été retiré : ce n'est pas un caractère espagnol
+        # courant, et il apparaît aussi en allemand/turc, ce qui
+        # provoquait de faux positifs sur ces langues.
+        "ñ", "á", "í", "ó", "ú"
     ]
 }
 
@@ -167,28 +170,40 @@ def score_accents(texte, langue):
     return score
 
 # ---------------- SEUIL DE CONFIANCE ----------------
-# Un seuil sur le score brut total est peu fiable : ce score dépend
-# fortement de la longueur du texte (plus de mots = mécaniquement plus
-# de mots-clés et d'accents comptés), donc aucune valeur fixe ne
-# fonctionne bien à la fois sur les textes courts et longs.
+# Constat important : sur un texte assez long, TOUTES les langues
+# européennes (même sans aucun rapport, ex: néerlandais, allemand)
+# obtiennent une entropie d'ordre 3 "proche" des profils de référence,
+# simplement parce qu'elles partagent l'alphabet latin et une structure
+# syllabique générale. Si on pondère l'entropie trop fort, ce bruit de
+# fond suffit à elle seule à valider n'importe quelle langue. Le score
+# d'entropie est donc maintenant pondéré beaucoup plus faiblement
+# (POIDS_ENTROPIE = 0.3) : il départage les langues proches mais ne
+# peut plus, seul, déclencher une détection positive.
 #
-# On utilise donc deux conditions complémentaires, plus robustes :
+# La décision finale repose sur deux conditions :
 #
 #   1) RATIO_MIN_AVANCE : la langue gagnante doit nettement se
-#      détacher de la 2e meilleure langue (sinon le texte est ambigu
-#      entre 2 langues, ou ressemble un peu à toutes sans appartenir
-#      clairement à aucune — cas typique d'une langue étrangère
-#      proche, comme l'italien ou l'allemand, qui partage quelques
-#      lettres/sons avec le français/espagnol).
+#      détacher de la 2e meilleure langue.
 #
-#   2) SIGNAL_LEXICAL_MIN : il faut au moins ce nombre d'indices
-#      lexicaux concrets (mots-clés reconnus + caractères accentués
-#      spécifiques) pour la langue gagnante. Cela évite qu'un texte
-#      qui ne matche presque rien soit validé uniquement parce que
-#      l'entropie d'ordre 3 penche légèrement d'un côté (l'entropie
-#      seule n'est pas un signal assez fort pour décider).
+#   2) SEUIL_SIGNAL : nombre minimum d'indices lexicaux concrets
+#      (mots-clés + caractères accentués) requis pour la langue
+#      gagnante. Ce seuil est adaptatif :
+#        - texte court (< SEUIL_TEXTE_COURT mots) : on tolère un seul
+#          indice solide, car un texte court contient mécaniquement
+#          peu de mots-clés même s'il est dans la bonne langue.
+#        - texte plus long : on exige un indice tous les 20 mots
+#          environ, pour empêcher qu'un texte long dans une langue
+#          étrangère passe grâce à 1-2 coïncidences lexicales isolées.
+#
+# Limite assumée : sur des textes très courts (quelques mots), aucune
+# méthode statistique simple ne peut garantir une détection fiable à
+# 100 % — il n'y a tout simplement pas assez de signal. Le seuil ici
+# vise un bon compromis, pas une garantie absolue.
+POIDS_ENTROPIE = 0.3
 RATIO_MIN_AVANCE = 1.3
-SIGNAL_LEXICAL_MIN = 2
+SEUIL_TEXTE_COURT = 10
+SEUIL_SIGNAL_MIN_LONG = 2
+DIVISEUR_SIGNAL_LONG = 20
 
 # ---------------- DETECTION ----------------
 
@@ -199,25 +214,25 @@ def detecter_langue(texte):
     if h3 == 0:
         return None, h3, None
 
+    nb_mots = max(1, len(tokeniser(texte)))
+
     scores = {}
     signal_lexical = {}
 
     for langue in CORPUS:
 
-        # Score entropie : on normalise avec une pénalité plus douce
-        # (corpus de référence agrandi => entropie plus stable => on
-        # peut utiliser une pénalité moins agressive que *50).
+        # Score entropie : pondéré faiblement (voir note ci-dessus),
+        # car sur un texte long il peut être "élevé" pour n'importe
+        # quelle langue latine, qu'elle soit supportée ou non.
         distance = abs(h3 - PROFILS_ENTROPIE[langue])
-        score_entropie = max(0, 100 - distance * 20)
+        score_entropie = max(0, 100 - distance * 20) * POIDS_ENTROPIE
 
-        # Score mots : matching par mots entiers désormais (voir
-        # tokeniser/score_mots), donc plus de faux positifs sur
-        # sous-chaînes.
+        # Score mots : matching par mots entiers (voir tokeniser /
+        # score_mots), donc plus de faux positifs sur sous-chaînes.
         sm = score_mots(texte, langue)
         score_mot = sm * 10
 
-        # Score accents : inchangé, déjà fiable car les caractères
-        # accentués sont peu ambigus entre langues.
+        # Score accents : caractères spécifiques à chaque langue.
         sa = score_accents(texte, langue)
         score_accent = sa * 15
 
@@ -236,7 +251,16 @@ def detecter_langue(texte):
         second_score == 0
         or meilleur_score >= second_score * RATIO_MIN_AVANCE
     )
-    signal_ok = signal_lexical[meilleure_langue] >= SIGNAL_LEXICAL_MIN
+
+    if nb_mots < SEUIL_TEXTE_COURT:
+        seuil_signal = 1
+    else:
+        seuil_signal = max(
+            SEUIL_SIGNAL_MIN_LONG,
+            nb_mots // DIVISEUR_SIGNAL_LONG
+        )
+
+    signal_ok = signal_lexical[meilleure_langue] >= seuil_signal
 
     # Si la langue gagnante ne se détache pas assez et/ou n'a pas
     # assez d'indices lexicaux concrets, on considère que le texte
