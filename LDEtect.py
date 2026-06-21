@@ -152,7 +152,7 @@ def detecter_langue(texte):
             meilleure_langue = langue
 
     # Seuil de rejet : si trop éloigné de tous les profils → langue inconnue
-    SEUIL = 0.3
+    SEUIL = 0.5
     if meilleure_distance > SEUIL:
         return None, h3
 
