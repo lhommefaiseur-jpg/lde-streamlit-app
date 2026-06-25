@@ -87,9 +87,6 @@ PROFILS_ENTROPIE = {
     for langue, corpus in CORPUS.items()
 }
 
-# ---------------- MOTS FREQUENTS (mots entiers uniquement) ----------------
-# Mots courants ET suffisamment discriminants (on évite les mots ultra
-# courts comme "es", "el", "la" qui se retrouvent partout par hasard).
 
 MOTS_CLES = {
 
@@ -166,15 +163,10 @@ def score_accents(texte, langue):
 
     return score
 
-# ---------------- PONDÉRATION ENTROPIE ----------------
-# Le score d'entropie est pondéré faiblement : sur un texte long, il
-# peut être "élevé" pour n'importe quelle langue latine (même non
-# supportée), car toutes partagent l'alphabet et une structure
-# syllabique générale. On le garde comme simple facteur de
-# départage entre les 3 langues, pas comme signal dominant.
+
 POIDS_ENTROPIE = 0.3
 
-# ---------------- DETECTION ----------------
+
 
 def detecter_langue(texte):
 
